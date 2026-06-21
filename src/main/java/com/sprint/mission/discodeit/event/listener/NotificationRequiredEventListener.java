@@ -71,7 +71,7 @@ public class NotificationRequiredEventListener {
   }
 
   @Async("eventTaskExecutor")
-  @EventListener
+  @TransactionalEventListener
   public void on(S3UploadFailedEvent event) {
     String requestId = event.getRequestId();
     UUID binaryContentId = event.getBinaryContentId();

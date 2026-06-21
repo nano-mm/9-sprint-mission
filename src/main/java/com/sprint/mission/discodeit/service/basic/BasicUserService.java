@@ -7,12 +7,16 @@ import com.sprint.mission.discodeit.dto.request.UserUpdateRequest;
 import com.sprint.mission.discodeit.entity.BinaryContent;
 import com.sprint.mission.discodeit.entity.User;
 import com.sprint.mission.discodeit.event.message.BinaryContentCreatedEvent;
+import com.sprint.mission.discodeit.event.message.UserCreatedEvent;
+import com.sprint.mission.discodeit.event.message.UserDeletedEvent;
+import com.sprint.mission.discodeit.event.message.UserUpdatedEvent;
 import com.sprint.mission.discodeit.exception.user.UserAlreadyExistsException;
 import com.sprint.mission.discodeit.exception.user.UserNotFoundException;
 import com.sprint.mission.discodeit.mapper.UserMapper;
 import com.sprint.mission.discodeit.repository.BinaryContentRepository;
 import com.sprint.mission.discodeit.repository.UserRepository;
 import com.sprint.mission.discodeit.service.UserService;
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -50,9 +54,6 @@ public class BasicUserService implements UserService {
     if (userRepository.existsByEmail(email)) {
       throw UserAlreadyExistsException.withEmail(email);
     }
-    if (userRepository.existsByUsername(username)) {
-      throw UserAlreadyExistsException.withUsername(username);
-    }
 
     BinaryContent nullableProfile = optionalProfileCreateRequest
         .map(profileRequest -> {
@@ -76,8 +77,17 @@ public class BasicUserService implements UserService {
     User user = new User(username, email, encodedPassword, nullableProfile);
 
     userRepository.save(user);
-    log.info("사용자 생성 완료: id={}, username={}", user.getId(), username);
-    return userMapper.toDto(user);
+
+    UserDto dto = userMapper.toDto(user);
+
+    eventPublisher.publishEvent(
+        new UserCreatedEvent(
+            dto,
+            user.getCreatedAt()
+        )
+    );
+
+    return dto;
   }
 
   @Transactional(readOnly = true)
@@ -118,6 +128,10 @@ public class BasicUserService implements UserService {
           return exception;
         });
 
+    // 변경 전 상태 저장
+    UserDto before =
+        userMapper.toDto(user);
+
     String newUsername = userUpdateRequest.newUsername();
     String newEmail = userUpdateRequest.newEmail();
 
@@ -153,7 +167,21 @@ public class BasicUserService implements UserService {
     user.update(newUsername, newEmail, encodedPassword, nullableProfile);
 
     log.info("사용자 수정 완료: id={}", userId);
-    return userMapper.toDto(user);
+
+    UserDto dto = userMapper.toDto(user);
+
+    UserDto after =
+        userMapper.toDto(user);
+
+    eventPublisher.publishEvent(
+        new UserUpdatedEvent(
+            before,
+            after,
+            user.getUpdatedAt()
+        )
+    );
+
+    return dto;
   }
 
   @CacheEvict(value = "users", key = "'all'")
@@ -166,8 +194,14 @@ public class BasicUserService implements UserService {
     if (!userRepository.existsById(userId)) {
       throw UserNotFoundException.withId(userId);
     }
-
     userRepository.deleteById(userId);
+
+    eventPublisher.publishEvent(
+        new UserDeletedEvent(
+            userId,
+            Instant.now()
+        )
+    );
     log.info("사용자 삭제 완료: id={}", userId);
   }
 }
